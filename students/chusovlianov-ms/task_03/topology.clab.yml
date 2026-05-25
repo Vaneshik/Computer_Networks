@@ -1,0 +1,309 @@
+name: itmo-net
+
+topology:
+
+  # ──────────── L2 bridge segments ────────────
+  nodes:
+    br-uplink:
+      kind: bridge          # client ↔ isp ↔ nat-gw  (1.1.1.0/24)
+    br-edge:
+      kind: bridge          # isp ↔ edge1 ↔ edge2    (10.1.0.0/24)
+    br-dmz:
+      kind: bridge          # edge1/2 ↔ lb-l34 ↔ fw  (10.2.0.0/24)
+    br-int:
+      kind: bridge          # fw ↔ lb-l7 ↔ services  (10.3.0.0/24)
+
+    # ──────────── Client (simulates internet user) ────────────
+    client:
+      kind: linux
+      image: local/client-tools:3.19
+      cmd: sleep infinity
+      exec:
+        - ip addr add 1.1.1.10/24 dev eth1
+        - ip addr add fd00:0::10/64 dev eth1
+        - ip route replace default via 1.1.1.1
+        - ip -6 route replace default via fd00:0::1
+        - sh -c 'echo "nameserver 1.1.1.53" > /etc/resolv.conf'
+
+    # ──────────── ISP router — BGP AS 65000 ────────────
+    isp:
+      kind: linux
+      image: quay.io/frrouting/frr:9.1.3
+      binds:
+        - configs/frr-isp/frr.conf:/etc/frr/frr.conf
+        - configs/frr-isp/daemons:/etc/frr/daemons
+        - configs/frr-isp/vtysh.conf:/etc/frr/vtysh.conf
+      exec:
+        - sysctl -w net.ipv4.ip_forward=1
+        - sysctl -w net.ipv6.conf.all.forwarding=1
+        - sysctl -w net.ipv4.conf.all.rp_filter=0
+        - sysctl -w net.ipv4.conf.default.rp_filter=0
+
+    # ──────────── Anycast edge routers ────────────
+    edge1:
+      kind: linux
+      image: quay.io/frrouting/frr:9.1.3
+      binds:
+        - configs/frr-edge1/frr.conf:/etc/frr/frr.conf
+        - configs/frr-edge1/daemons:/etc/frr/daemons
+        - configs/frr-edge1/vtysh.conf:/etc/frr/vtysh.conf
+      exec:
+        - sysctl -w net.ipv4.ip_forward=1
+        - sysctl -w net.ipv6.conf.all.forwarding=1
+        - sysctl -w net.ipv4.conf.all.rp_filter=0
+        - sysctl -w net.ipv4.conf.default.rp_filter=0
+        - ip route replace 1.1.1.0/24 via 10.1.0.1 dev eth1
+        - ip -6 route replace fd00:0::/64 via fd00:1::1 dev eth1
+
+    edge2:
+      kind: linux
+      image: quay.io/frrouting/frr:9.1.3
+      binds:
+        - configs/frr-edge2/frr.conf:/etc/frr/frr.conf
+        - configs/frr-edge2/daemons:/etc/frr/daemons
+        - configs/frr-edge2/vtysh.conf:/etc/frr/vtysh.conf
+      exec:
+        - sysctl -w net.ipv4.ip_forward=1
+        - sysctl -w net.ipv6.conf.all.forwarding=1
+        - sysctl -w net.ipv4.conf.all.rp_filter=0
+        - sysctl -w net.ipv4.conf.default.rp_filter=0
+        - ip route replace 1.1.1.0/24 via 10.1.0.1 dev eth1
+        - ip -6 route replace fd00:0::/64 via fd00:1::1 dev eth1
+
+    # ──────────── L3/L4 Load balancer (nginx stream, VIP=10.99.0.1) ────────────
+    lb-l34:
+      kind: linux
+      image: nginx:alpine
+      ports:
+        - "443:443"
+      binds:
+        - configs/lb-l34/nginx.conf:/etc/nginx/nginx.conf
+      exec:
+        - ip addr add 10.2.0.20/24 dev eth1
+        - ip addr add fd00:2::20/64 dev eth1
+        - ip addr add 10.99.0.1/32 dev eth1
+        - ip addr add fd00:99::1/128 dev eth1
+        - sysctl -w net.ipv4.conf.all.rp_filter=0
+        - sysctl -w net.ipv4.conf.default.rp_filter=0
+        - sysctl -w net.ipv4.conf.eth1.rp_filter=0
+        - ip route replace default via 10.2.0.30
+        - ip -6 route replace default via fd00:2::30
+        - ip route replace 1.1.1.0/24 via 10.2.0.11 dev eth1
+        - ip -6 route replace fd00:0::/64 via fd00:2::11 dev eth1
+
+    # ──────────── Firewall (nftables, L3 routing) ────────────
+    firewall:
+      kind: linux
+      image: local/client-tools:3.19   # nftables already installed in this image
+      cmd: sleep infinity
+      binds:
+        - configs/firewall/nftables.conf:/etc/nftables.conf
+      exec:
+        - ip addr add 10.2.0.30/24 dev eth1
+        - ip addr add fd00:2::30/64 dev eth1
+        - ip addr add 10.3.0.1/24 dev eth2
+        - ip addr add fd00:3::1/64 dev eth2
+        - sysctl -w net.ipv4.ip_forward=1
+        - sysctl -w net.ipv6.conf.all.forwarding=1
+        - ip route replace 1.1.1.0/24 via 10.2.0.11 dev eth1
+        - ip -6 route replace fd00:0::/64 via fd00:2::11 dev eth1
+        - apk add --no-cache --quiet nftables
+        - nft -f /etc/nftables.conf
+
+    # ──────────── Public DNS: itmo.ru ────────────
+    coredns-pub:
+      kind: linux
+      image: local/coredns-ip:1.11.1
+      binds:
+        - configs/coredns-public/Corefile:/Corefile
+        - configs/coredns-public/itmo.ru.zone:/zones/itmo.ru.zone
+      exec:
+        - ip addr add 1.1.1.53/24 dev eth1
+        - ip route replace default via 1.1.1.253
+      cmd: -conf /Corefile
+
+    # ──────────── L7 Load balancer (nginx HTTPS, round-robin) ────────────
+    lb-l7:
+      kind: linux
+      image: nginx:alpine
+      binds:
+        - configs/lb-l7/nginx.conf:/etc/nginx/nginx.conf
+        - configs/certs/cert.pem:/etc/ssl/certs/itmo.pem
+        - configs/certs/key.pem:/etc/ssl/private/itmo.key
+      exec:
+        - ip addr add 10.3.0.7/24 dev eth1
+        - ip addr add fd00:3::7/64 dev eth1
+        - ip route replace default via 10.3.0.254
+        - ip route add 10.2.0.0/24 via 10.3.0.1
+        - ip route add 1.1.1.0/24 via 10.3.0.1
+        - ip -6 route replace default via fd00:3::254
+        - ip -6 route add fd00:2::/64 via fd00:3::1
+
+    # ──────────── Web backends ────────────
+    web1:
+      kind: linux
+      image: nginx:alpine
+      binds:
+        - configs/web/nginx.conf:/etc/nginx/nginx.conf
+        - configs/web/index-1.html:/usr/share/nginx/html/index.html
+      exec:
+        - ip addr add 10.3.0.11/24 dev eth1
+        - ip addr add fd00:3::11/64 dev eth1
+        - ip route replace default via 10.3.0.254
+
+    web2:
+      kind: linux
+      image: nginx:alpine
+      binds:
+        - configs/web/nginx.conf:/etc/nginx/nginx.conf
+        - configs/web/index-2.html:/usr/share/nginx/html/index.html
+      exec:
+        - ip addr add 10.3.0.12/24 dev eth1
+        - ip addr add fd00:3::12/64 dev eth1
+        - ip route replace default via 10.3.0.254
+
+    web3:
+      kind: linux
+      image: nginx:alpine
+      binds:
+        - configs/web/nginx.conf:/etc/nginx/nginx.conf
+        - configs/web/index-3.html:/usr/share/nginx/html/index.html
+      exec:
+        - ip addr add 10.3.0.13/24 dev eth1
+        - ip addr add fd00:3::13/64 dev eth1
+        - ip route replace default via 10.3.0.254
+
+    # ──────────── Database ────────────
+    postgres:
+      kind: linux
+      image: postgres:15-alpine
+      env:
+        POSTGRES_PASSWORD: pg123
+        POSTGRES_USER: admin
+        POSTGRES_DB: itmo
+      exec:
+        - ip addr add 10.3.0.20/24 dev eth1
+        - ip route replace default via 10.3.0.254
+
+    # ──────────── SSO — Keycloak ────────────
+    keycloak:
+      kind: linux
+      image: local/keycloak-ip:24.0
+      binds:
+        - configs/keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json
+      env:
+        KEYCLOAK_ADMIN: admin
+        KEYCLOAK_ADMIN_PASSWORD: admin123
+        KC_DB: dev-file
+        KC_HOSTNAME_STRICT: "false"
+        KC_HTTP_ENABLED: "true"
+        KC_PROXY: edge
+      exec:
+        - ip addr add 10.3.0.50/24 dev eth1
+        - ip route replace default via 10.3.0.254
+      cmd: start-dev --import-realm
+
+    # ──────────── SSO — oauth2-proxy ────────────
+    oauth2-proxy:
+      kind: linux
+      image: local/oauth2-proxy-ip:v7.6.0   # ENTRYPOINT ["/bin/sh"] is set in the Dockerfile
+      binds:
+        - configs/oauth2-proxy/oauth2-proxy.cfg:/etc/oauth2-proxy.cfg
+        - configs/oauth2-proxy/start.sh:/start.sh
+      exec:
+        - ip addr add 10.3.0.40/24 dev eth1
+        - ip route replace 10.3.0.0/24 dev eth1 src 10.3.0.40
+        - ip route replace default via 10.3.0.254
+        - sh -c 'echo "nameserver 10.3.0.53" > /etc/resolv.conf'
+      cmd: /start.sh
+
+    # ──────────── DB web UI ────────────
+    dbgate:
+      kind: linux
+      image: dbgate/dbgate:alpine
+      env:
+        CONNECTIONS: pg_itmo
+        LABEL_pg_itmo: "ITMO Database"
+        SERVER_pg_itmo: "10.3.0.20"
+        PORT_pg_itmo: "5432"
+        USER_pg_itmo: admin
+        PASSWORD_pg_itmo: pg123
+        DATABASE_pg_itmo: itmo
+        ENGINE_pg_itmo: pg@dbgate-plugin-postgres
+      exec:
+        - ip addr add 10.3.0.30/24 dev eth1
+        - ip route replace default via 10.3.0.254
+
+    # ──────────── Internal DNS: itmo-team.ru ────────────
+    coredns-int:
+      kind: linux
+      image: local/coredns-ip:1.11.1
+      binds:
+        - configs/coredns-internal/Corefile:/Corefile
+        - configs/coredns-internal/itmo-team.ru.zone:/zones/itmo-team.ru.zone
+      exec:
+        - ip addr add 10.3.0.53/24 dev eth1
+        - ip route replace default via 10.3.0.254
+      cmd: -conf /Corefile
+
+    # ──────────── SSH SSO (Teleport) ────────────
+    teleport:
+      kind: linux
+      image: public.ecr.aws/gravitational/teleport-distroless-debug:15.0.0
+      entrypoint: busybox
+      binds:
+        - configs/teleport/teleport.yaml:/etc/teleport.yaml
+        - configs/teleport/start.sh:/start.sh
+      exec:
+        - ip addr add 10.3.0.60/24 dev eth1
+        - ip route replace default via 10.3.0.254
+      cmd: sh /start.sh
+      ports:
+        - "3080:3080"
+
+    # ──────────── NAT gateway (masquerade INT → internet) ────────────
+    nat-gw:
+      kind: linux
+      image: local/client-tools:3.19   # nftables already installed in this image
+      cmd: sleep infinity
+      binds:
+        - configs/nat-gw/setup.sh:/setup.sh
+      exec:
+        - ip addr add 1.1.1.253/24 dev eth1
+        - ip addr add 10.3.0.254/24 dev eth2
+        - ip addr add fd00:3::254/64 dev eth2
+        - apk add --no-cache --quiet nftables
+        - sh /setup.sh
+
+  # ──────────── Links ────────────
+  links:
+    # br-uplink: 1.1.1.0/24  (internet simulation)
+    - endpoints: ["client:eth1",      "br-uplink:cl-u"]
+    - endpoints: ["isp:eth1",         "br-uplink:isp-u"]
+    - endpoints: ["coredns-pub:eth1", "br-uplink:cp-u"]
+    - endpoints: ["nat-gw:eth1",      "br-uplink:ng-u"]
+
+    # br-edge: 10.1.0.0/24  (ISP ↔ edges, BGP)
+    - endpoints: ["isp:eth2",   "br-edge:isp-e"]
+    - endpoints: ["edge1:eth1", "br-edge:e1-e"]
+    - endpoints: ["edge2:eth1", "br-edge:e2-e"]
+
+    # br-dmz: 10.2.0.0/24  (edge ↔ lb-l34 ↔ firewall)
+    - endpoints: ["edge1:eth2",   "br-dmz:e1-d"]
+    - endpoints: ["edge2:eth2",   "br-dmz:e2-d"]
+    - endpoints: ["lb-l34:eth1",  "br-dmz:l34-d"]
+    - endpoints: ["firewall:eth1","br-dmz:fw-d"]
+
+    # br-int: 10.3.0.0/24  (internal services)
+    - endpoints: ["firewall:eth2",    "br-int:fw-i"]
+    - endpoints: ["lb-l7:eth1",       "br-int:l7-i"]
+    - endpoints: ["web1:eth1",        "br-int:w1-i"]
+    - endpoints: ["web2:eth1",        "br-int:w2-i"]
+    - endpoints: ["web3:eth1",        "br-int:w3-i"]
+    - endpoints: ["postgres:eth1",    "br-int:pg-i"]
+    - endpoints: ["keycloak:eth1",    "br-int:kc-i"]
+    - endpoints: ["oauth2-proxy:eth1","br-int:op-i"]
+    - endpoints: ["dbgate:eth1",      "br-int:dg-i"]
+    - endpoints: ["coredns-int:eth1", "br-int:ci-i"]
+    - endpoints: ["teleport:eth1",    "br-int:tp-i"]
+    - endpoints: ["nat-gw:eth2",      "br-int:ng-i"]

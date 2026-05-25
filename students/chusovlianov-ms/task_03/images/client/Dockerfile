@@ -1,0 +1,10 @@
+FROM alpine:3.19
+
+RUN apk add --no-cache \
+    iproute2 \
+    curl \
+    bind-tools \
+    netcat-openbsd \
+    openssl
+
+CMD ["sleep", "infinity"]

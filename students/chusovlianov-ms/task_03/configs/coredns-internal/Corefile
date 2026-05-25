@@ -1,0 +1,13 @@
+. {
+    # Authoritative for itmo-team.ru (internal services)
+    file /zones/itmo-team.ru.zone itmo-team.ru
+
+    # Forward external queries to public DNS
+    forward . 1.1.1.53 {
+        prefer_udp
+    }
+
+    errors
+    log
+    cache 30
+}

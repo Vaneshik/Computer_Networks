@@ -1,0 +1,19 @@
+$ORIGIN itmo.ru.
+$TTL 30
+
+@   IN SOA ns1.itmo.ru. admin.itmo.ru. (
+    2024010101 ; serial
+    3600       ; refresh
+    900        ; retry
+    604800     ; expire
+    30         ; minimum TTL
+)
+
+@           IN NS   ns1.itmo.ru.
+ns1         IN A    1.1.1.53
+
+; Anycast VIP — both IPv4 and IPv6
+@           IN A    10.99.0.1
+@           IN AAAA fd00:99::1
+www         IN A    10.99.0.1
+www         IN AAAA fd00:99::1

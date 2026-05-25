@@ -1,0 +1,25 @@
+$ORIGIN itmo-team.ru.
+$TTL 30
+
+@   IN SOA ns1.itmo-team.ru. admin.itmo-team.ru. (
+    2024010101 ; serial
+    3600
+    900
+    604800
+    30
+)
+
+@       IN NS   ns1.itmo-team.ru.
+ns1     IN A    10.3.0.53
+
+; All service endpoints resolve to the anycast VIP
+; lb-l7 dispatches by Host header
+@           IN A    10.99.0.1
+db          IN A    10.99.0.1
+auth        IN A    10.99.0.1
+
+; Direct internal access (bypass lb-l34/firewall) for internal tools
+postgres    IN A    10.3.0.20
+keycloak    IN A    10.3.0.50
+dbgate      IN A    10.3.0.30
+teleport    IN A    10.3.0.60

@@ -1,0 +1,13 @@
+. {
+    # Authoritative for itmo.ru
+    file /zones/itmo.ru.zone itmo.ru
+
+    # Forward everything else to upstream (8.8.8.8)
+    forward . 8.8.8.8 8.8.4.4 {
+        prefer_udp
+    }
+
+    errors
+    log
+    cache 30
+}

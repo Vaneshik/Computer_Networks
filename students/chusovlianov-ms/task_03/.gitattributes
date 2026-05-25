@@ -1,0 +1,13 @@
+* text=auto
+
+*.sh     text eol=lf
+*.yml    text eol=lf
+*.yaml   text eol=lf
+*.conf   text eol=lf
+*.cfg    text eol=lf
+*.json   text eol=lf
+*.zone   text eol=lf
+*.md     text eol=lf
+*.html   text eol=lf
+Corefile text eol=lf
+daemons  text eol=lf

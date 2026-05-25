@@ -1,0 +1,60 @@
+{
+  "realm": "itmo",
+  "displayName": "ITMO Corporate",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "clients": [
+    {
+      "clientId": "dbgate",
+      "name": "DbGate",
+      "description": "Database web interface",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "dbgate-secret-2024",
+      "redirectUris": [
+        "https://db.itmo-team.ru/*",
+        "https://db.itmo-team.ru/oauth2/callback",
+        "http://10.3.0.40:4180/*",
+        "http://10.3.0.40:4180/oauth2/callback"
+      ],
+      "webOrigins": ["*"],
+      "standardFlowEnabled": true,
+      "protocol": "openid-connect"
+    }
+  ],
+  "users": [
+    {
+      "username": "admin",
+      "email": "admin@itmo.ru",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Admin",
+      "lastName": "ITMO",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "admin123",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["default-roles-itmo"]
+    },
+    {
+      "username": "developer",
+      "email": "dev@itmo.ru",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Developer",
+      "lastName": "ITMO",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "dev123",
+          "temporary": false
+        }
+      ]
+    }
+  ]
+}

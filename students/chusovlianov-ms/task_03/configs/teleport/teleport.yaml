@@ -1,0 +1,25 @@
+version: v3
+
+teleport:
+  nodename: teleport.itmo-team.ru
+  data_dir: /var/lib/teleport
+  log:
+    output: stderr
+    severity: INFO
+
+auth_service:
+  enabled: yes
+  listen_addr: 0.0.0.0:3025
+  cluster_name: itmo-team.ru
+
+ssh_service:
+  enabled: yes
+  listen_addr: 0.0.0.0:3022
+  labels:
+    env: lab
+    role: internal
+
+proxy_service:
+  enabled: yes
+  web_listen_addr: 0.0.0.0:3080
+  public_addr: localhost:3080
